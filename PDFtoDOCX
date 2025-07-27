@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+import sys
+import io
+from pathlib import Path
+
+import fitz  # PyMuPDF
+from docx import Document
+from docx.shared import Inches
+from tqdm import tqdm
+
+
+def pdf_to_docx(pdf_path: str, docx_path: str, include_images: bool = True):
+    pdf_path = Path(pdf_path)
+    docx_path = Path(docx_path)
+
+    if not pdf_path.exists():
+        raise FileNotFoundError(f"PDF not found: {pdf_path}")
+
+    doc = Document()
+
+    with fitz.open(pdf_path) as pdf:
+        for page_index in tqdm(range(len(pdf)), desc="Converting pages"):
+            page = pdf[page_index]
+
+            # ---- Text ----
+            text = page.get_text("text")
+            if text.strip():
+                for para in text.splitlines():
+                    # Keep empty lines to mimic spacing a bit
+                    doc.add_paragraph(para)
+            else:
+                doc.add_paragraph("[No extractable text on this page]")
+
+            # ---- Images (optional, naive placement after the text of the page) ----
+            if include_images:
+                imglist = page.get_images(full=True)
+                for img_no, img in enumerate(imglist, start=1):
+                    xref = img[0]
+                    base_image = pdf.extract_image(xref)
+                    image_bytes = base_image["image"]
+                    image_ext = base_image["ext"]
+
+                    # python-docx accepts a file-like object
+                    stream = io.BytesIO(image_bytes)
+                    # You can tweak the width if you want to limit image size
+                    doc.add_picture(stream, width=Inches(6))
+
+            # Page break between PDF pages (skip after last page)
+            if page_index != len(pdf) - 1:
+                doc.add_page_break()
+
+    doc.save(docx_path)
+    print(f"Saved: {docx_path.resolve()}")
+
+
+def main():
+    if len(sys.argv) < 3:
+        print("Usage: python pdf_to_docx.py input.pdf output.docx [--no-images]")
+        sys.exit(1)
+
+    pdf_path = sys.argv[1]
+    docx_path = sys.argv[2]
+    include_images = "--no-images" not in sys.argv[3:]
+
+    pdf_to_docx(pdf_path, docx_path, include_images)
+
+
+if __name__ == "__main__":
+    main()
